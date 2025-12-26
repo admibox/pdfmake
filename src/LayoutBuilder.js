@@ -475,7 +475,11 @@ class LayoutBuilder {
 
 		applyMargins(() => {
 			let unbreakable = node.unbreakable;
-			if (unbreakable) {
+			// pushToBottom: position this block at the bottom of the current page
+			// We use an unbreakable block internally to measure content height
+			let pushToBottom = node.pushToBottom;
+			
+			if (unbreakable || pushToBottom) {
 				this.writer.beginUnbreakableBlock();
 			}
 
@@ -525,7 +529,9 @@ class LayoutBuilder {
 				this.writer.context().endDetachedBlock();
 			}
 
-			if (unbreakable) {
+			if (pushToBottom) {
+				this.writer.commitUnbreakableBlockToBottom();
+			} else if (unbreakable) {
 				this.writer.commitUnbreakableBlock();
 			}
 		});

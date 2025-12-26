@@ -157,6 +157,41 @@ class PageElementWriter extends ElementWriter {
 		return rep;
 	}
 
+	/**
+	 * Commits an unbreakable block and positions it at the bottom of the current page.
+	 * The block is rendered at a Y position such that its bottom edge aligns with
+	 * the bottom margin of the page.
+	 */
+	commitUnbreakableBlockToBottom() {
+		if (--this.transactionLevel === 0) {
+			let unbreakableContext = this.context();
+			this.popContext();
+
+			let nbPages = unbreakableContext.pages.length;
+			if (nbPages > 0) {
+				let fragment = unbreakableContext.pages[0];
+				
+				// Calculate the height of the rendered content
+				let contentHeight = unbreakableContext.y;
+				
+				// Get page dimensions and margins
+				let pageSize = this.context().getCurrentPage().pageSize;
+				let pageMargins = this.context().pageMargins;
+				
+				// Calculate Y position to push content to bottom
+				// bottomY = pageHeight - bottomMargin - contentHeight
+				let bottomY = pageSize.height - pageMargins.bottom - contentHeight;
+				
+				fragment.xOffset = this.originalX;
+				fragment.yOffset = bottomY;
+				fragment.height = contentHeight;
+
+				// Add fragment at the calculated position (detached from flow)
+				super.addFragment(fragment, true, true, true);
+			}
+		}
+	}
+
 	pushToRepeatables(rep) {
 		this.repeatables.push(rep);
 	}
