@@ -33,6 +33,8 @@ class LayoutBuilder {
 		this.svgMeasure = svgMeasure;
 		this.tableLayouts = {};
 		this.nestedLevel = 0;
+		// vertical alignment: track current cell context for linking items
+		this.currentCell = null;
 	}
 
 	registerTableLayouts(tableLayouts) {
@@ -475,7 +477,11 @@ class LayoutBuilder {
 
 		applyMargins(() => {
 			let unbreakable = node.unbreakable;
-			if (unbreakable) {
+			// pushToBottom: position this block at the bottom of the current page
+			// We use an unbreakable block internally to measure content height
+			let pushToBottom = node.pushToBottom;
+
+			if (unbreakable || pushToBottom) {
 				this.writer.beginUnbreakableBlock();
 			}
 
@@ -525,7 +531,9 @@ class LayoutBuilder {
 				this.writer.context().endDetachedBlock();
 			}
 
-			if (unbreakable) {
+			if (pushToBottom) {
+				this.writer.commitUnbreakableBlockToBottom();
+			} else if (unbreakable) {
 				this.writer.commitUnbreakableBlock();
 			}
 		});
@@ -533,11 +541,17 @@ class LayoutBuilder {
 
 	// vertical container
 	processVerticalContainer(node) {
-		node.stack.forEach(item => {
+		const gap = node.gap || 0;
+		const lastIndex = node.stack.length - 1;
+
+		node.stack.forEach((item, index) => {
 			this.processNode(item);
 			addAll(node.positions, item.positions);
 
-			//TODO: paragraph gap
+			// Add gap between items (not after the last one)
+			if (gap && index < lastIndex) {
+				this.writer.context().moveDown(gap);
+			}
 		}, this);
 	}
 
@@ -884,7 +898,11 @@ class LayoutBuilder {
 			this.writer.context().beginColumn(width, leftOffset, endOfRowSpanCell);
 
 			if (!cell._span) {
+				// vertical alignment: track current cell for linking child items
+				const prevCell = this.currentCell;
+				this.currentCell = cell;
 				this.processNode(cell);
+				this.currentCell = prevCell;
 				this.writer.context().updateBottomByPage();
 				addAll(positions, cell.positions);
 			} else if (cell._columnEndingContext) {
@@ -1068,6 +1086,16 @@ class LayoutBuilder {
 	// leafs (texts)
 	processLeaf(node) {
 		let line = this.buildNextLine(node);
+
+		// vertical alignment: link line to cell (or node) for later lookup
+		const cellRef = this.currentCell || node;
+		line && (line.nodeRef = cellRef);
+
+		// Pass rotation to line for rendering
+		if (line && node.rotation) {
+			line.rotation = node.rotation;
+		}
+
 		if (line && (node.tocItem || node.id)) {
 			line._node = node;
 		}
@@ -1106,9 +1134,28 @@ class LayoutBuilder {
 			node.positions.push(positions);
 			line = this.buildNextLine(node);
 			if (line) {
+				// vertical alignment: link subsequent lines to cell too
+				line.nodeRef = cellRef;
+				// Pass rotation to subsequent lines
+				if (node.rotation) {
+					line.rotation = node.rotation;
+				}
 				currentHeight += line.getHeight();
 			}
 		}
+
+		// Compensate for lineHeight > 1: the extra space is added BELOW baseline,
+		// so after the last line there's dead space that makes text appear higher than it should.
+		// Move Y pointer back by the dead space to eliminate this gap.
+		if (node.lineHeight && node.lineHeight > 1) {
+			const fontSize = node.fontSize || 12;
+			const deadSpace = fontSize * (node.lineHeight - 1);
+			this.writer.context().moveDown(-deadSpace);
+			currentHeight -= deadSpace;
+		}
+
+		// vertical alignment: store content height on node
+		node.contentHeight = currentHeight;
 	}
 
 	processToc(node) {
@@ -1195,21 +1242,29 @@ class LayoutBuilder {
 
 	// images
 	processImage(node) {
+		// vertical alignment: link image to cell for later lookup
+		node.nodeRef = this.currentCell || node;
 		let position = this.writer.addImage(node);
 		node.positions.push(position);
 	}
 
 	processCanvas(node) {
+		// vertical alignment: link canvas to cell for later lookup
+		node.nodeRef = this.currentCell || node;
 		let positions = this.writer.addCanvas(node);
 		addAll(node.positions, positions);
 	}
 
 	processSVG(node) {
+		// vertical alignment: link SVG to cell for later lookup
+		node.nodeRef = this.currentCell || node;
 		let position = this.writer.addSVG(node);
 		node.positions.push(position);
 	}
 
 	processQr(node) {
+		// vertical alignment: link QR to cell for later lookup
+		node.nodeRef = this.currentCell || node;
 		let position = this.writer.addQr(node);
 		node.positions.push(position);
 	}

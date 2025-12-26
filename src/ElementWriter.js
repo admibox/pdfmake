@@ -38,7 +38,10 @@ class ElementWriter extends EventEmitter {
 		line.x = context.x + (line.x || 0);
 		line.y = context.y + (line.y || 0);
 
-		this.alignLine(line);
+		// Skip horizontal alignment for rotated lines - we handle centering in Renderer
+		if (!line.rotation) {
+			this.alignLine(line);
+		}
 
 		addPageItem(page, {
 			type: 'line',
@@ -47,7 +50,22 @@ class ElementWriter extends EventEmitter {
 		this.emit('lineAdded', line);
 
 		if (!dontUpdateContextPosition) {
-			context.moveDown(height);
+			// For rotated text, move perpendicular to text flow instead of down
+			if (line.rotation) {
+				const normalizedAngle = ((line.rotation % 360) + 360) % 360;
+				if (normalizedAngle === 270 || line.rotation === -90) {
+					// -90°: text flows up, so next line should be to the RIGHT
+					context.x += height;
+				} else if (normalizedAngle === 90) {
+					// +90°: text flows down, so next line should be to the LEFT
+					context.x -= height;
+				} else {
+					// Other angles: default behavior
+					context.moveDown(height);
+				}
+			} else {
+				context.moveDown(height);
+			}
 		}
 
 		return position;
