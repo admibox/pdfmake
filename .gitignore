@@ -11,3 +11,5 @@ package-lock.json
 yarn.lock
 /js
 /build
+/doctopus/output
+/doctopus/node_modules

@@ -1,0 +1,14 @@
+# Dependencies
+node_modules/
+
+# pdfmake fork is a separate repo
+pdfmake-fork/
+
+# Generated files
+output/
+
+# OS
+.DS_Store
+
+# Logs
+*.log
