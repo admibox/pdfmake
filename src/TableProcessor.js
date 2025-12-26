@@ -150,6 +150,12 @@ class TableProcessor {
 		return () => {
 			let offset = this.rowPaddingTop + (!this.headerRows ? this.topLineWidth : 0);
 			writer.context().availableHeight -= this.reservedAtBottom;
+
+			// vertical alignment: update row top position BEFORE moveDown (consistent with beginRow)
+			if (this.tableNode.table.rowsHeight && this.tableNode.table.rowsHeight[rowIndex]) {
+				this.tableNode.table.rowsHeight[rowIndex].top = writer.context().y;
+			}
+
 			writer.context().moveDown(offset);
 		};
 	}
@@ -442,11 +448,22 @@ class TableProcessor {
 						let [items, contentHeight] = this.getAllChildsAndHeight(writer, cell);
 
 						// update y for all items
-						const offsetTop = cell.verticalAlign === 'bottom' ? cellHeight - contentHeight : (cellHeight - contentHeight) / 2;
+						const paddingTop = tableProcessor.layout.paddingTop(rowIndex, this.tableNode);
+						const paddingBottom = tableProcessor.layout.paddingBottom(rowIndex, this.tableNode);
+
+						let offsetTop;
+						if (cell.verticalAlign === 'bottom') {
+							// For bottom: position content so it ends at (cellHeight - paddingBottom)
+							offsetTop = cellHeight - contentHeight - paddingBottom;
+						} else {
+							// For middle: center content between paddings
+							offsetTop = (cellHeight - contentHeight) / 2;
+						}
+						const actualOffset = Math.max(0, offsetTop - paddingTop);
+
 						items.filter(x => x.item).forEach(x => {
-							const paddingTop = tableProcessor.layout.paddingTop(rowIndex, this.tableNode);
-							x.item.type && offsetVector(x.item, 0, Math.max(0, offsetTop) - paddingTop);
-							!x.item.type && (x.item.y += Math.max(0, offsetTop) - paddingTop);
+							x.item.type && offsetVector(x.item, 0, actualOffset);
+							!x.item.type && (x.item.y += actualOffset);
 						});
 					}
 				}
@@ -494,8 +511,10 @@ class TableProcessor {
 		let endingY = writer.context().y;
 
 		// vertical alignment: store row height
+		// Use the updated top value which accounts for page breaks
 		if (this.tableNode.table.rowsHeight && this.tableNode.table.rowsHeight[rowIndex]) {
-			this.tableNode.table.rowsHeight[rowIndex].height = endingY - this.rowTopY + this.bottomLineWidth;
+			let rowStartY = this.tableNode.table.rowsHeight[rowIndex].top;
+			this.tableNode.table.rowsHeight[rowIndex].height = endingY - rowStartY + this.bottomLineWidth;
 		}
 
 		let xs = getLineXs();

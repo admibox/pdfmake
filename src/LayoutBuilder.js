@@ -33,6 +33,8 @@ class LayoutBuilder {
 		this.svgMeasure = svgMeasure;
 		this.tableLayouts = {};
 		this.nestedLevel = 0;
+		// vertical alignment: track current cell context for linking items
+		this.currentCell = null;
 	}
 
 	registerTableLayouts(tableLayouts) {
@@ -890,7 +892,11 @@ class LayoutBuilder {
 			this.writer.context().beginColumn(width, leftOffset, endOfRowSpanCell);
 
 			if (!cell._span) {
+				// vertical alignment: track current cell for linking child items
+				const prevCell = this.currentCell;
+				this.currentCell = cell;
 				this.processNode(cell);
+				this.currentCell = prevCell;
 				this.writer.context().updateBottomByPage();
 				addAll(positions, cell.positions);
 			} else if (cell._columnEndingContext) {
@@ -1074,6 +1080,11 @@ class LayoutBuilder {
 	// leafs (texts)
 	processLeaf(node) {
 		let line = this.buildNextLine(node);
+
+		// vertical alignment: link line to cell (or node) for later lookup
+		const cellRef = this.currentCell || node;
+		line && (line.nodeRef = cellRef);
+
 		if (line && (node.tocItem || node.id)) {
 			line._node = node;
 		}
@@ -1112,9 +1123,14 @@ class LayoutBuilder {
 			node.positions.push(positions);
 			line = this.buildNextLine(node);
 			if (line) {
+				// vertical alignment: link subsequent lines to cell too
+				line.nodeRef = cellRef;
 				currentHeight += line.getHeight();
 			}
 		}
+
+		// vertical alignment: store content height on node
+		node.contentHeight = currentHeight;
 	}
 
 	processToc(node) {
@@ -1201,21 +1217,29 @@ class LayoutBuilder {
 
 	// images
 	processImage(node) {
+		// vertical alignment: link image to cell for later lookup
+		node.nodeRef = this.currentCell || node;
 		let position = this.writer.addImage(node);
 		node.positions.push(position);
 	}
 
 	processCanvas(node) {
+		// vertical alignment: link canvas to cell for later lookup
+		node.nodeRef = this.currentCell || node;
 		let positions = this.writer.addCanvas(node);
 		addAll(node.positions, positions);
 	}
 
 	processSVG(node) {
+		// vertical alignment: link SVG to cell for later lookup
+		node.nodeRef = this.currentCell || node;
 		let position = this.writer.addSVG(node);
 		node.positions.push(position);
 	}
 
 	processQr(node) {
+		// vertical alignment: link QR to cell for later lookup
+		node.nodeRef = this.currentCell || node;
 		let position = this.writer.addQr(node);
 		node.positions.push(position);
 	}
