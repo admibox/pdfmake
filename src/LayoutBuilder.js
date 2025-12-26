@@ -1091,6 +1091,11 @@ class LayoutBuilder {
 		const cellRef = this.currentCell || node;
 		line && (line.nodeRef = cellRef);
 
+		// Pass rotation to line for rendering
+		if (line && node.rotation) {
+			line.rotation = node.rotation;
+		}
+
 		if (line && (node.tocItem || node.id)) {
 			line._node = node;
 		}
@@ -1131,6 +1136,10 @@ class LayoutBuilder {
 			if (line) {
 				// vertical alignment: link subsequent lines to cell too
 				line.nodeRef = cellRef;
+				// Pass rotation to subsequent lines
+				if (node.rotation) {
+					line.rotation = node.rotation;
+				}
 				currentHeight += line.getHeight();
 			}
 		}

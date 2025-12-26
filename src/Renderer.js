@@ -129,13 +129,68 @@ class Renderer {
 		x = x || 0;
 		y = y || 0;
 
+		// Handle rotation
+		const rotation = line.rotation;
+		let rotationOffsetX = 0;
+		let rotationOffsetY = 0;
+
+		if (rotation) {
+			this.pdfDocument.save();
+
+			const lineWidth = line.getWidth();
+			const inlineAlignment = line.inlines && line.inlines.length > 0 && line.inlines[0].alignment;
+			const alignment = inlineAlignment || line.alignment;
+
+			// After rotation, coordinate axes are rotated. To offset in PAGE coordinates:
+			// For rotation θ around (x,y), to appear at page position (px, py):
+			//   draw_x = x + cos(θ)*(px-x) + sin(θ)*(py-y)
+			//   draw_y = y - sin(θ)*(px-x) + cos(θ)*(py-y)
+			//
+			// For -90° (θ=-90°, cos=-0, sin=-1):
+			//   To start at page (x, y + offset): draw at (x - offset, y)
+			// For +90° (θ=90°, cos=0, sin=1):
+			//   To start at page (x, y - offset): draw at (x - offset, y)
+
+			const normalizedAngle = ((rotation % 360) + 360) % 360;
+
+			if (alignment === 'center') {
+				if (normalizedAngle === 270 || rotation === -90) {
+					// -90°: text flows UPWARD. To center, start at page (x, y + width/2)
+					// In rotated coords: draw at (x - width/2, y)
+					rotationOffsetX = -lineWidth / 2;
+				} else if (normalizedAngle === 90) {
+					// +90°: text flows DOWNWARD. To center, start at page (x, y - width/2)
+					// In rotated coords: draw at (x + width/2, y)
+					rotationOffsetX = lineWidth / 2;
+				} else {
+					// For other rotations, simple X offset works approximately
+					rotationOffsetX = -lineWidth / 2;
+				}
+			} else if (alignment === 'right') {
+				if (normalizedAngle === 270 || rotation === -90) {
+					rotationOffsetX = -lineWidth;
+				} else if (normalizedAngle === 90) {
+					rotationOffsetX = lineWidth;
+				} else {
+					rotationOffsetX = -lineWidth;
+				}
+			}
+
+			// Rotation origin is at (x, y)
+			this.pdfDocument.rotate(rotation, { origin: [x, y] });
+		}
+
 		let lineHeight = line.getHeight();
 		let ascenderHeight = line.getAscenderHeight();
 		let descent = lineHeight - ascenderHeight;
 
 		const textDecorator = new TextDecorator(this.pdfDocument);
 
-		textDecorator.drawBackground(line, x, y);
+		// Apply rotation offset for background
+		const drawX = x + rotationOffsetX;
+		const drawY = y + rotationOffsetY;
+
+		textDecorator.drawBackground(line, drawX, drawY);
 
 		//TODO: line.optimizeInlines();
 		//TOOD: lines without differently styled inlines should be written to pdf as one stream
@@ -174,17 +229,22 @@ class Renderer {
 			this.pdfDocument._font = inline.font;
 			this.pdfDocument.fontSize(inline.fontSize);
 
-			let shiftedY = offsetText(y + shiftToBaseline, inline);
-			this.pdfDocument.text(inline.text, x + inline.x, shiftedY, options);
+			let shiftedY = offsetText(drawY + shiftToBaseline, inline);
+			this.pdfDocument.text(inline.text, drawX + inline.x, shiftedY, options);
 
 			if (inline.linkToPage) {
 				this.pdfDocument.ref({ Type: 'Action', S: 'GoTo', D: [inline.linkToPage, 0, 0] }).end();
-				this.pdfDocument.annotate(x + inline.x, shiftedY, inline.width, inline.height, { Subtype: 'Link', Dest: [inline.linkToPage - 1, 'XYZ', null, null, null] });
+				this.pdfDocument.annotate(drawX + inline.x, shiftedY, inline.width, inline.height, { Subtype: 'Link', Dest: [inline.linkToPage - 1, 'XYZ', null, null, null] });
 			}
 		}
 
 		// Decorations won't draw correctly for superscript
-		textDecorator.drawDecorations(line, x, y);
+		textDecorator.drawDecorations(line, drawX, drawY);
+
+		// Restore graphics state after rotation
+		if (rotation) {
+			this.pdfDocument.restore();
+		}
 	}
 
 	renderVector(vector) {
