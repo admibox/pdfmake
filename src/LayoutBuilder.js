@@ -478,7 +478,7 @@ class LayoutBuilder {
 			// pushToBottom: position this block at the bottom of the current page
 			// We use an unbreakable block internally to measure content height
 			let pushToBottom = node.pushToBottom;
-			
+
 			if (unbreakable || pushToBottom) {
 				this.writer.beginUnbreakableBlock();
 			}

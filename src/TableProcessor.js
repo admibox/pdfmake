@@ -1,4 +1,5 @@
 import ColumnCalculator from './columnCalculator';
+import { offsetVector } from './helpers/tools';
 import { isNumber, isPositiveInteger } from './helpers/variableType';
 
 class TableProcessor {
@@ -7,6 +8,9 @@ class TableProcessor {
 	}
 
 	beginTable(writer) {
+		// vertical alignment: track row heights
+		this.tableNode.table.rowsHeight = [];
+
 		const getTableInnerContentWidth = () => {
 			let width = 0;
 
@@ -137,6 +141,9 @@ class TableProcessor {
 
 		// update the border properties of all cells before drawing any lines
 		prepareCellBorders(this.tableNode.table.body);
+
+		// vertical alignment: store table start Y
+		this.tableNode.startY = writer.context().y;
 	}
 
 	onRowBreak(rowIndex, writer) {
@@ -169,6 +176,11 @@ class TableProcessor {
 		writer.context().availableHeight -= this.reservedAtBottom;
 
 		writer.context().moveDown(this.rowPaddingTop);
+
+		// vertical alignment: track row top position
+		if (this.tableNode.table.rowsHeight) {
+			this.tableNode.table.rowsHeight[rowIndex] = { top: this.rowTopY, height: undefined };
+		}
 	}
 
 	drawHorizontalLine(lineIndex, writer, overrideY, moveDown = true, forcePage) {
@@ -358,7 +370,95 @@ class TableProcessor {
 		borderColor = null;
 	}
 
+	// vertical alignment helper methods
+	getCellContentHeight(cell, items) {
+		let contentHeight = 0;
+		cell._maxHeight && (contentHeight = cell._maxHeight); // for canvas
+		// for forced multiline text, text with lineHeight, ul, ol
+		cell.contentHeight && (contentHeight = cell.contentHeight);
+		!contentHeight && (contentHeight = items.reduce((p, v) => {
+			const item = v.item.inlines ? (v.item.inlines[0] ? v.item.inlines[0] : null) : v.item;
+			const lineHeight = v.item.nodeRef && v.item.nodeRef.lineHeight ? v.item.nodeRef.lineHeight : (v.item._height ? v.item._height : v.item.h);
+			let height = item.height ? item.height : (item.h ? item.h : 0);
+			(v.type === 'vector') || (cell.ol && !v.item.lastLineInParagraph) && (height = 0); // for ol with counter
+			return p + (height / (lineHeight ? lineHeight : 1));
+		}, 0));
+		!contentHeight && cell._height && (contentHeight = cell._height); // for text, image, svg, qr
+		return contentHeight;
+	}
+
+	computeCellHeight(table, rowIndex, cell) {
+		let cellHeight = 0;
+		if (cell.rowSpan && cell.rowSpan > 1) {
+			const heights = table.rowsHeight.slice(rowIndex, rowIndex + cell.rowSpan);
+			cellHeight = heights.reduce((previousValue, value) => previousValue + value.height, 0);
+		} else {
+			cellHeight = table.rowsHeight[rowIndex].height;
+		}
+		return cellHeight;
+	}
+
+	getAllChildsAndHeight(writer, node) {
+		const getCells = (node) => node.table ? node.table.body.flat().map(getCells).flat() : node;
+		const getNestedTables = (node) => node.table ? [node, ...node.table.body.flat().map(getNestedTables).filter(Boolean).flat()] : null;
+		const pageItems = writer.context().pages.flatMap(x => x.items);
+		let nestedTables;
+		let items = pageItems.filter(i => i.item.nodeRef === node || i.item === node);
+		let itemsHeight = 0;
+
+		if (items.length === 0 && node.table) {
+			itemsHeight = node.table.rowsHeight.reduce((p, v) => p + v.height, 0);
+			for (let rowIndex = 0; rowIndex <= node.table.body.length; rowIndex++) {
+				// add all h line width
+				itemsHeight += node._layout.hLineWidth(rowIndex, node);
+			}
+			nestedTables = getNestedTables(node);
+			items = pageItems.filter(i => getCells(node).indexOf(i.item.nodeRef) > -1 ||
+				i.item.tableRef && nestedTables.some(nt => nt.table === i.item.tableRef));
+		} else if (node.stack) {
+			const tables = node.stack.filter(x => x.table);
+			nestedTables = getNestedTables(tables[0]);
+			itemsHeight = tables.reduce((p, v) => p + v.computedHeight, 0) +
+				node.stack.flatMap(x => x.contentHeight).filter(Boolean).reduce((p, v) => p + v, 0);
+			items = [...items, pageItems.filter(i => getCells(tables[0]).indexOf(i.item.nodeRef) > -1 ||
+				i.item.tableRef && nestedTables.some(nt => nt.table === i.item.tableRef))].flat();
+		} else {
+			itemsHeight = this.getCellContentHeight(node, items);
+		}
+
+		return [items, itemsHeight];
+	}
+
+	processTableVerticalAlignment(writer, tableProcessor, table) {
+		table.body.forEach((row, rowIndex) => {
+			// filter only cells with vertical alignment (middle / bottom)
+			let cells = !Array.isArray(row) && row.columns ? row.columns : row;
+			cells.forEach(cell => {
+				if (!cell._span && cell.verticalAlign && ['middle', 'bottom'].indexOf(cell.verticalAlign) > -1) {
+					// manage vertical alignment (middle or bottom) for all rows in the table
+					let cellHeight = this.computeCellHeight(table, rowIndex, cell);
+					if (cellHeight && isNumber(cellHeight)) {
+						// get all child items and their height
+						let [items, contentHeight] = this.getAllChildsAndHeight(writer, cell);
+
+						// update y for all items
+						const offsetTop = cell.verticalAlign === 'bottom' ? cellHeight - contentHeight : (cellHeight - contentHeight) / 2;
+						items.filter(x => x.item).forEach(x => {
+							const paddingTop = tableProcessor.layout.paddingTop(rowIndex, this.tableNode);
+							x.item.type && offsetVector(x.item, 0, Math.max(0, offsetTop) - paddingTop);
+							!x.item.type && (x.item.y += Math.max(0, offsetTop) - paddingTop);
+						});
+					}
+				}
+			});
+		});
+	}
+
 	endTable(writer) {
+		// vertical alignment: compute and apply
+		this.tableNode.computedHeight = writer.context().y - this.tableNode.startY;
+		this.processTableVerticalAlignment(writer, this, this.tableNode.table);
+
 		if (this.cleanUpRepeatables) {
 			writer.popFromRepeatables();
 		}
@@ -392,6 +492,11 @@ class TableProcessor {
 
 		let endingPage = writer.context().page;
 		let endingY = writer.context().y;
+
+		// vertical alignment: store row height
+		if (this.tableNode.table.rowsHeight && this.tableNode.table.rowsHeight[rowIndex]) {
+			this.tableNode.table.rowsHeight[rowIndex].height = endingY - this.rowTopY + this.bottomLineWidth;
+		}
 
 		let xs = getLineXs();
 

@@ -170,18 +170,18 @@ class PageElementWriter extends ElementWriter {
 			let nbPages = unbreakableContext.pages.length;
 			if (nbPages > 0) {
 				let fragment = unbreakableContext.pages[0];
-				
+
 				// Calculate the height of the rendered content
 				let contentHeight = unbreakableContext.y;
-				
+
 				// Get page dimensions and margins
 				let pageSize = this.context().getCurrentPage().pageSize;
 				let pageMargins = this.context().pageMargins;
-				
+
 				// Calculate Y position to push content to bottom
 				// bottomY = pageHeight - bottomMargin - contentHeight
 				let bottomY = pageSize.height - pageMargins.bottom - contentHeight;
-				
+
 				fragment.xOffset = this.originalX;
 				fragment.yOffset = bottomY;
 				fragment.height = contentHeight;
