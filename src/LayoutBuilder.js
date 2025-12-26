@@ -541,11 +541,17 @@ class LayoutBuilder {
 
 	// vertical container
 	processVerticalContainer(node) {
-		node.stack.forEach(item => {
+		const gap = node.gap || 0;
+		const lastIndex = node.stack.length - 1;
+
+		node.stack.forEach((item, index) => {
 			this.processNode(item);
 			addAll(node.positions, item.positions);
 
-			//TODO: paragraph gap
+			// Add gap between items (not after the last one)
+			if (gap && index < lastIndex) {
+				this.writer.context().moveDown(gap);
+			}
 		}, this);
 	}
 
@@ -1127,6 +1133,16 @@ class LayoutBuilder {
 				line.nodeRef = cellRef;
 				currentHeight += line.getHeight();
 			}
+		}
+
+		// Compensate for lineHeight > 1: the extra space is added BELOW baseline,
+		// so after the last line there's dead space that makes text appear higher than it should.
+		// Move Y pointer back by the dead space to eliminate this gap.
+		if (node.lineHeight && node.lineHeight > 1) {
+			const fontSize = node.fontSize || 12;
+			const deadSpace = fontSize * (node.lineHeight - 1);
+			this.writer.context().moveDown(-deadSpace);
+			currentHeight -= deadSpace;
 		}
 
 		// vertical alignment: store content height on node

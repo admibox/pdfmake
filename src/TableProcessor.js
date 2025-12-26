@@ -390,6 +390,7 @@ class TableProcessor {
 			return p + (height / (lineHeight ? lineHeight : 1));
 		}, 0));
 		!contentHeight && cell._height && (contentHeight = cell._height); // for text, image, svg, qr
+
 		return contentHeight;
 	}
 
@@ -429,7 +430,21 @@ class TableProcessor {
 			items = [...items, pageItems.filter(i => getCells(tables[0]).indexOf(i.item.nodeRef) > -1 ||
 				i.item.tableRef && nestedTables.some(nt => nt.table === i.item.tableRef))].flat();
 		} else {
-			itemsHeight = this.getCellContentHeight(node, items);
+			// Calculate actual height from rendered items (minY to maxY)
+			if (items.length > 0) {
+				let minY = Infinity, maxY = -Infinity;
+				items.forEach(i => {
+					const y = i.item.y !== undefined ? i.item.y : (i.item.y1 !== undefined ? i.item.y1 : 0);
+					const h = i.item.getHeight ? i.item.getHeight() : (i.item.h || i.item.height || 0);
+					minY = Math.min(minY, y);
+					maxY = Math.max(maxY, y + h);
+				});
+				itemsHeight = maxY - minY;
+			}
+			// Fallback to old method if no items or invalid result
+			if (!itemsHeight || itemsHeight <= 0) {
+				itemsHeight = this.getCellContentHeight(node, items);
+			}
 		}
 
 		return [items, itemsHeight];
@@ -447,6 +462,7 @@ class TableProcessor {
 						// get all child items and their height
 						let [items, contentHeight] = this.getAllChildsAndHeight(writer, cell);
 
+
 						// update y for all items
 						const paddingTop = tableProcessor.layout.paddingTop(rowIndex, this.tableNode);
 						const paddingBottom = tableProcessor.layout.paddingBottom(rowIndex, this.tableNode);
@@ -459,6 +475,16 @@ class TableProcessor {
 							// For middle: center content between paddings
 							offsetTop = (cellHeight - contentHeight) / 2;
 						}
+
+						// Compensate for lineHeight: space is added BELOW baseline, not evenly
+						// So visible text appears higher than the line block center
+						// Add half the "dead space" from the last line to truly center visually
+						if (cell.lineHeight && cell.lineHeight > 1) {
+							const fontSize = cell.fontSize || 12; // default font size
+							const lineHeightDeadSpace = fontSize * (cell.lineHeight - 1);
+							offsetTop += lineHeightDeadSpace / 2;
+						}
+
 						const actualOffset = Math.max(0, offsetTop - paddingTop);
 
 						items.filter(x => x.item).forEach(x => {
